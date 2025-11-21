@@ -21,52 +21,46 @@ export default async function handler(req, res) {
     return;
   }
 
-  const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
-  if (!OPENAI_API_KEY) {
-    res.status(500).json({
-      error: "OPENAI_API_KEY not set on server. Add it in Vercel → Project → Settings → Environment Variables."
-    });
-    return;
-  }
-
   const systemPrompt = `
 You are Sanjai, a candidate interviewing for the AI Agent role at 100x.
-You respond in first person, clearly, concisely, and confidently.
-Keep answers short and interview-ready. Speak as a real person, not an AI.
+Speak in first person, confident, concise, and human.
+Keep answers short and interview-ready.
   `.trim();
 
-  try {
-    const apiRes = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${OPENAI_API_KEY}`,
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        model: process.env.OPENAI_MODEL || "gpt-4o-mini",
-        messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: question }
-        ],
-        max_tokens: 300,
-        temperature: 0.2
-      })
-    });
+  const prompt = systemPrompt + "\n\nUser: " + question + "\nSanjai:";
 
-    if (!apiRes.ok) {
-      const err = await apiRes.text();
-      res.status(500).json({
-        error: "OpenAI API error",
+  try {
+    const response = await fetch(
+      "https://api-inference.huggingface.co/models/meta-llama/Meta-Llama-3-8B-Instruct",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          inputs: prompt,
+          parameters: {
+            max_new_tokens: 200,
+            temperature: 0.4
+          }
+        })
+      }
+    );
+
+    if (!response.ok) {
+      const err = await response.text();
+      return res.status(500).json({
+        error: "HuggingFace API error",
         details: err
       });
-      return;
     }
 
-    const data = await apiRes.json();
-    const answer = data.choices?.[0]?.message?.content?.trim() || "I couldn't generate a reply.";
+    const data = await response.json();
+    const answer =
+      data?.[0]?.generated_text?.replace(prompt, "").trim() ||
+      "I couldn't generate a reply.";
 
     res.status(200).json({ answer });
-
   } catch (err) {
     res.status(500).json({
       error: "Server crashed",
