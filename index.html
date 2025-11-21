@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Voicebot — Sanjai (100x Assessment)</title>
+  <style>
+    body { font-family: Inter, system-ui, Arial; max-width: 820px; margin: 36px auto; padding: 20px; color:#111; }
+    h1 { margin-bottom: 8px; font-size: 1.4rem; }
+    .card { border:1px solid #e6e6e6; border-radius:10px; padding:18px; box-shadow: 0 6px 18px rgba(0,0,0,0.03); }
+    .row { display:flex; gap:12px; align-items:center; margin-top:12px; flex-wrap:wrap; }
+    button { padding:10px 14px; border-radius:8px; border: none; cursor:pointer; background:#111; color:white; font-weight:600; }
+    button.secondary { background:#f3f3f3; color:#111; border:1px solid #d8d8d8; }
+    #transcript, #reply { width:100%; min-height:72px; padding:10px; border-radius:8px; border:1px solid #ddd; background: #fff; white-space:pre-wrap; }
+    #status { font-size:0.9rem; color:#666; margin-top:10px; }
+    .small { font-size:0.9rem; color:#555; margin-top:8px; }
+    .muted { color:#888; font-size:0.85rem; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>Voicebot — Sanjai (100x Assessment)</h1>
+    <div class="small">Press <strong>Start Recording</strong>, ask a question (out loud), then listen to the reply. Works on Chrome/Edge. If browser blocks microphone, allow it.</div>
+
+    <div class="row" style="margin-top:16px;">
+      <button id="startBtn">Start Recording</button>
+      <button id="stopBtn" class="secondary" disabled>Stop</button>
+      <button id="playSample" class="secondary">Play Prepared Sample Q&A</button>
+    </div>
+
+    <div style="margin-top:14px;">
+      <label>What I heard (transcript)</label>
+      <pre id="transcript">--</pre>
+    </div>
+
+    <div style="margin-top:12px;">
+      <label>Bot reply (text)</label>
+      <pre id="reply">--</pre>
+    </div>
+
+    <div id="status" class="muted">Status: Idle</div>
+
+    <div class="small" style="margin-top:18px;">
+      Deployment note: deploy this repo to Vercel and set environment variable <code>OPENAI_API_KEY</code>. No API key is stored in the browser.
+    </div>
+  </div>
+
+<script>
+const startBtn = document.getElementById('startBtn');
+const stopBtn  = document.getElementById('stopBtn');
+const transcriptEl = document.getElementById('transcript');
+const replyEl = document.getElementById('reply');
+const statusEl = document.getElementById('status');
+const playSample = document.getElementById('playSample');
+
+let recognition;
+let recognizing = false;
+
+function setStatus(t) { statusEl.textContent = 'Status: ' + t; }
+
+if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
+  setStatus('SpeechRecognition API not supported in this browser. Use Chrome/Edge on desktop or Android.');
+  startBtn.disabled = true;
+} else {
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  recognition = new SpeechRecognition();
+  recognition.lang = 'en-IN';
+  recognition.interimResults = false;
+  recognition.maxAlternatives = 1;
+
+  recognition.onstart = () => { recognizing = true; setStatus('Listening...'); startBtn.disabled = true; stopBtn.disabled = false; };
+  recognition.onerror = (e) => { console.error(e); setStatus('Microphone error or permission denied.'); startBtn.disabled = false; stopBtn.disabled = true; };
+  recognition.onend = () => { recognizing = false; setStatus('Processing...'); startBtn.disabled = false; stopBtn.disabled = true; };
+  recognition.onresult = (event) => {
+    const text = Array.from(event.results).map(r => r[0].transcript).join('');
+    transcriptEl.textContent = text || '--';
+    sendToServer(text);
+  };
+}
+
+startBtn.addEventListener('click', () => {
+  try {
+    recognition.start();
+  } catch (err) {
+    console.warn(err);
+  }
+});
+
+stopBtn.addEventListener('click', () => {
+  if (recognition && recognizing) recognition.stop();
+  setStatus('Stopped listening.');
+});
+
+playSample.addEventListener('click', () => {
+  const sampleQs = [
+    "What should we know about your life story in a few sentences?",
+    "What's your number one superpower?",
+    "What are the top three areas you'd like to grow in?",
+    "What misconception do your coworkers have about you?",
+    "How do you push your boundaries and limits?"
+  ];
+  askBatch(sampleQs);
+});
+
+async function askBatch(questions) {
+  for (const q of questions) {
+    transcriptEl.textContent = q;
+    setStatus('Asking: ' + q);
+    await sendToServer(q, { speak: true });
+    await new Promise(r => setTimeout(r, 600));
+  }
+  setStatus('Sample Q&A finished.');
+}
+
+async function sendToServer(text, opts = { speak: true }) {
+  if (!text || text.trim().length === 0) {
+    setStatus('No text to send.');
+    return;
+  }
+  setStatus('Sending to server...');
+  try {
+    const resp = await fetch('/api/chat', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ question: text })
+    });
+    if (!resp.ok) {
+      const errText = await resp.text();
+      setStatus('Server error: ' + resp.status + ' — ' + errText);
+      replyEl.textContent = '--';
+      return;
+    }
+    const data = await resp.json();
+    const answer = data.answer || '[no answer]';
+    replyEl.textContent = answer;
+    setStatus('Received reply.');
+    if (opts.speak !== false) speak(answer);
+  } catch (err) {
+    console.error(err);
+    setStatus('Network error calling server.');
+  }
+}
+
+function speak(text) {
+  if (!('speechSynthesis' in window)) {
+    setStatus('SpeechSynthesis not available in this browser.');
+    return;
+  }
+  const ut = new SpeechSynthesisUtterance(text);
+  ut.lang = 'en-GB';
+  ut.rate = 1.0;
+  ut.pitch = 1.0;
+  const voices = speechSynthesis.getVoices();
+  if (voices.length) {
+    const v = voices.find(v=>/female|Google UK English Female|Microsoft/gi.test(v.name)) || voices[0];
+    if (v) ut.voice = v;
+  }
+  speechSynthesis.cancel();
+  speechSynthesis.speak(ut);
+}
+</script>
+</body>
+</html>
