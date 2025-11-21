@@ -22,16 +22,16 @@ export default async function handler(req, res) {
   }
 
   const systemPrompt = `
-You are Sanjai, a candidate interviewing for the AI Agent role at 100x.
-Speak in first person, confident, concise, and human.
-Keep answers short and interview-ready.
+You are Sanjai, interviewing for the AI Agent role at 100x.
+Speak confidently, concisely, naturally, and in first person.
+Keep answers short, professional, and human.
   `.trim();
 
   const prompt = systemPrompt + "\n\nUser: " + question + "\nSanjai:";
 
   try {
     const response = await fetch(
-      "https://api-inference.huggingface.co/models/meta-llama/Meta-Llama-3-8B-Instruct",
+      "https://router.huggingface.co/inference/meta-llama/Meta-Llama-3-8B-Instruct",
       {
         method: "POST",
         headers: {
@@ -40,7 +40,7 @@ Keep answers short and interview-ready.
         body: JSON.stringify({
           inputs: prompt,
           parameters: {
-            max_new_tokens: 200,
+            max_new_tokens: 180,
             temperature: 0.4
           }
         })
@@ -56,9 +56,17 @@ Keep answers short and interview-ready.
     }
 
     const data = await response.json();
-    const answer =
-      data?.[0]?.generated_text?.replace(prompt, "").trim() ||
-      "I couldn't generate a reply.";
+
+    let answer = "";
+
+    // HF router returns text differently; handle all formats
+    if (Array.isArray(data) && data[0]?.generated_text) {
+      answer = data[0].generated_text.replace(prompt, "").trim();
+    } else if (data?.generated_text) {
+      answer = data.generated_text.replace(prompt, "").trim();
+    } else {
+      answer = "Sorry, I couldn't generate a response.";
+    }
 
     res.status(200).json({ answer });
   } catch (err) {
